@@ -1,0 +1,339 @@
+---
+title: "Report On Malnutrition of Children Under the Age 5yrs in Kenya"
+author: "Bore Laban,"
+date: "5/10/2020"
+output:
+  html_document:
+    number_sections: yes
+  pdf_document: default
+---
+
+```{r message=FALSE, loaded-packages}
+#load packages
+library(tidyverse)
+set.seed(12345)
+library(here)
+library(kableExtra)
+library(ggplot2)
+library(caret)
+```
+
+# **Introduction**
+The report explores the malnutrition of children under the age of 5 years. The malnutrition data was collect from Kenya Demographic and Health Survey 2014 with 18901 observations and 4 variables of interest.
+
+The goal of this report is to **develop an algorithm for assessing and predicting** the nutritional status of children in rural geographies of Kenya. We will answer the following three questions:
+
+* Whether each of the dependent variables are normally distributed.
+* Explore each of the dependent variables and determine the subset that best explains the variability in each of the response variable using stepwise regression method.
+* Distinguish between the full model and the reduced model obtained during stepwise regression using mean error(ME), root mean square error(RMSE) and the mean absolute percentage error(MAPE)
+
+# **Data Analysis**
+Description of variables
+
+## Outcome variables
+
+```{r echo=F}
+#select variables of interest
+tibble(outcomeVar=c("bmiz06", "haz06", "waz06", "whz06"),
+       labelVar=c("BMI-for-age Z-score","Length/height-for-age Z-score","Weight-for-age Z-score","Weight-for-length/height Z-score"),
+       type=rep("continuous", rep=4)) %>% kable() %>% kable_styling(fixed_thead = T)
+```
+
+## Independent variables
+
+```{r echo=F, comment=NA}
+tibble(independentVar=c(
+                         "b4",
+                         "bidx",
+                         "bord",
+                         "v012",
+                         "v024",
+                         "v025",
+                         "v106",
+                         "v130",
+                         "v131",
+                         "v151",
+                         "v152",
+                         "v191"
+                        ),
+       LabelVar = c(
+                         "sex of child",
+                         "birth column number",
+                         "birth order number",
+                         "respondent's current age",
+                         "region",
+                         "type of place of residence",
+                         "highest educational level",
+                         "religion",
+                         "ethnicity",
+                         "sex of household head",
+                         "age of household head",
+                         "wealth index factor score (5 decimals)"
+                         ),
+       Type = c(
+                          "Categorical",
+                          "NA",
+                          "Ordinal",
+                          "Continuous",
+                          "Categorical",
+                          "Categorical",
+                          "Categorical",
+                          "Categorical",
+                          "Categorical",
+                          "Categorical",
+                          "Continuous",
+                          "Continuous"
+                          )
+
+) %>% kable() %>%  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+## Data Preparation 
+
+Selected 5 rows of dataset and all variables of interest  
+```{r malnutrition-dataser, echo=FALSE}
+malnutritionData <- read.csv("malnutritiondata.csv") %>% as_tibble()
+#select variable of interest
+malnutritionDataSet <- malnutritionData %>% select(-c(1:5), -v013, -b0) 
+#First 5 dataset
+kable(malnutritionDataSet[1:5,]) %>%  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive", font_size = 7))
+
+#select independent variables objects
+
+#indepVar <- malnutritionDataSet %>% select(-c(13:16)) %>% view()
+
+#select dependent variables objects
+
+dep_haz06 <- malnutritionDataSet %>% select(haz06)  %>% unlist() %>% as.numeric()
+dep_waz06 <- malnutritionDataSet %>% select(waz06)  %>% unlist() %>% as.numeric()
+dep_whz06 <- malnutritionDataSet %>% select(whz06)  %>% unlist() %>% as.numeric()
+dep_bmiz06 <- malnutritionDataSet %>% select(bmiz06) %>% unlist() %>% as.numeric()
+```
+
+## Explorative Data Analysis
+
+**Summary of the dataset**
+```{r,echo=F}
+summary(malnutritionDataSet) %>% kable() %>%  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive", font_size = 5, fixed_thread=T, full_width = F))
+```
+
+
+### Checking for normality of each dependent variable
+
+* Is each of the dependent variables normally distributed?
+
+ **Using Histogram**
+```{r hist_check_normality, echo=F}
+# Is each of the dependent variables normally distributed
+par(mfrow=c(2,2))
+hist(dep_haz06, probability = T, main = "Length/height-for-age Z-score", xlab = "haz06")
+  lines(density(dep_haz06))
+hist(dep_waz06, probability = T,main = "Weight-for-age Z-score", xlab = "waz06")
+  lines(density(dep_waz06))
+hist(dep_whz06, probability = T,main = "Weight-for-length/height Z-score", xlab = "whz06")
+  lines(density(dep_whz06))
+hist(dep_bmiz06, probability = T, main =  "BMI-for-age Z-score", xlab = "bmiz06")
+  lines(density(dep_bmiz06))
+ggsave("img/hist_check_normality.png")
+dev.off()
+```
+
+**Using Normal Probability Plot of Dependent Variables**
+
+```{r, echo=F}
+par(mfrow=c(2,2))
+qqnorm(dep_haz06, main = "Length/height-for-age Z-score")
+  qqline(dep_haz06)
+qqnorm(dep_waz06, main =  "Weight-for-age Z-score")
+  qqline(dep_waz06)
+qqnorm(dep_whz06, main = "Weight-for-length/height Z-score")
+  qqline(dep_whz06)
+qqnorm(dep_bmiz06, main = "BMI-for-age Z-score")
+  qqline(dep_bmiz06)  
+```
+
+### Variable selection and Stepwise Regression Method
+
+* Explore each of the dependent variables and determine the subset that best explains the variability in each of the response variable using stepwise regression method 
+
+**Variable Selection**
+
+
+```{r variable-selection}
+#Backward elimination
+fitbmiz06full <-lm(bmiz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = malnutritionDataSet)
+bestfitbmiz06<-step(fitbmiz06full, direction = "both", trace=F)
+summary(bestfitbmiz06)
+
+fithaz06full <-lm(haz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = malnutritionDataSet)
+bestfithaz06<-step(fithaz06full, direction = "both", trace=F)
+summary(bestfithaz06)
+
+fitwaz06full <-lm(waz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = malnutritionDataSet)
+bestfitwaz06<-step(fitwaz06full, direction = "both", trace=F)
+summary(bestfitwaz06)
+
+fitwhz06full <-lm(whz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = malnutritionDataSet)
+bestfitwhz06<-step(fitwhz06full, direction = "both", trace=F) 
+summary(bestfitwhz06)
+
+```
+
+
+### Prediction and Model Assessment
+
+* Distinguish between the full model and the reduced model obtained during stepwise regression using mean error(ME), root mean square error(RMSE) and the mean absolute percentage error(MAPE)
+
+**Model Selection**
+
+Subsetting data into training and test dataset
+```{r trained-test-data}
+training_sample <- sample(1:nrow(malnutritionDataSet), size = 0.7*nrow(malnutritionDataSet),replace = F) #slect 70% sample of data for training the model
+
+#Draw the actual training data from the dataframe
+training_data<-malnutritionDataSet[training_sample,] 
+training_data<-na.omit(training_data)
+test_data<-malnutritionDataSet[-training_sample,] #30% is used as test dataset
+test_data<-na.omit(test_data)
+
+```
+
+*Full and Reduced Model for Each Dependent Variable*
+
+```{r}
+bmiz06full <-lm(bmiz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = training_data)
+
+bestfit_bmiz06_reduced<-step(bmiz06full, direction = "both", trace=F)
+summary(bestfit_bmiz06_reduced)
+
+haz06full <-lm(haz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = training_data)
+
+bestfit_haz06_reduced<-step(haz06full, direction = "both", trace=F)
+summary(bestfit_haz06_reduced)
+
+waz06full <-lm(waz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = training_data)
+
+bestfit_waz06_reduced<-step(waz06full, direction = "both", trace=F)
+summary(bestfit_waz06_reduced)
+
+whz06full <-lm(whz06 ~v012+v024+v025+v106+v130+v131+v151+v152+v191+bidx+bord+b4, data = training_data)
+
+bestfit_whz06_reduced<-step(whz06full, direction = "both", trace=F) 
+summary(bestfit_whz06_reduced)
+
+```
+
+Prediction and assessing ME, RMSE & MAPE for all dependent variables
+
+```{r prediction-assessment-of-model}
+test_data_bmiz06full<-predict(bmiz06full, data=test_data)
+test_data_bmiz06reduced<-predict(bestfit_bmiz06_reduced, data=test_data)
+
+
+test_data_haz06full<-predict(haz06full, data=test_data)
+test_data_haz06reduced<-predict(bestfit_haz06_reduced, data=test_data)
+
+
+test_data_waz06full<-predict(waz06full, data=test_data)
+test_data_waz06reduced<-predict(bestfit_waz06_reduced, data=test_data)
+
+test_data_whz06full<-predict(whz06full, data=test_data)
+test_data_whz06reduced<-predict(bestfit_whz06_reduced, data=test_data)
+
+```
+
+**Computation of Mean Error**
+
+```{r warning=F}
+mean(test_data$bmiz06-test_data_bmiz06full)
+mean(test_data$bmiz06-test_data_bmiz06reduced)
+
+mean(test_data$haz06-test_data_haz06full)
+mean(test_data$haz06-test_data_haz06reduced)
+
+mean(test_data$waz06-test_data_waz06full)
+mean(test_data$waz06-test_data_waz06reduced)
+
+mean(test_data$whz06-test_data_whz06full)
+mean(test_data$whz06-test_data_whz06reduced)
+
+
+```
+
+
+**Computation of RMES**
+```{r warning=F}
+RMSE(test_data_bmiz06full, test_data$bmiz06)
+RMSE(test_data_bmiz06reduced, test_data$bmiz06)
+
+RMSE(test_data_haz06full, test_data$haz06)
+RMSE(test_data_haz06reduced, test_data$haz06)
+
+RMSE(test_data_waz06full, test_data$waz06)
+RMSE(test_data_waz06reduced, test_data$waz06)
+
+RMSE(test_data_whz06full, test_data$whz06)
+RMSE(test_data_whz06reduced, test_data$whz06)
+
+```
+
+**Computation of MAPE**
+```{r warning=FALSE}
+#bmiz06 
+with(test_data %>% filter(bmiz06 > 0),
+     sum(abs((bmiz06 - test_data_bmiz06full)/bmiz06))/5671 * 100 # full model
+     )
+with(test_data %>% filter(bmiz06 > 0),
+     sum(abs((bmiz06 - test_data_bmiz06reduced)/bmiz06))/5671 * 100 # reduced model
+     )
+
+#haz06
+with(test_data %>% filter(haz06 > 0),
+     sum(abs((haz06 - test_data_haz06full)/haz06))/5671 * 100 # full model
+     )
+with(test_data %>% filter(haz06 > 0),
+     sum(abs((haz06 - test_data_haz06reduced)/haz06))/5671 * 100 # reduced model
+     )
+
+#waz06
+with(test_data %>% filter(waz06 > 0),
+     sum(abs((waz06 - test_data_waz06full)/waz06))/5671 * 100 # full model
+     )
+with(test_data %>% filter(waz06 > 0),
+     sum(abs((waz06 - test_data_waz06reduced)/waz06))/5671 * 100 # reduced model
+     )
+
+#whz06 
+with(test_data %>% filter(whz06 > 0),
+     sum(abs((whz06 - test_data_whz06full)/whz06))/5671 * 100 # full model
+     )
+with(test_data %>% filter(whz06 > 0),
+     sum(abs((whz06 - test_data_whz06reduced)/whz06))/5671 * 100 # reduced model
+     )
+
+
+
+```
+
+
+
+
+# **Results and Interpretation**
+
+Length/height-for-age Z-score(haz06), Weight-for-age Z-score(waz06) and BMI-for-age Z-score(bmiz06) are normally distributed. From the normal plot; Weight-for-length/height Z-score is not normally distributed.
+
+For all the response variables; atmost 12% of the variables is explained by the respective models. The model is underfitting the data.
+
+The variability of the computed mean error(ME),RMSE and MAPE for the true and predicted values is minimal to some decimal points for response variable Length/height-for-age Z-score(haz06), Weight-for-age Z-score(waz06) and BMI-for-age Z-score(bmiz06). However, the variation of MAPE for  true and predicted values of Weight-for-length/height Z-score(whz06) is **20.6366** i.e `418.873-398.2364`
+
+# **Conclusion**
+
+From the analysis of respective response variables against the independent variables it is observed that only less than 12% of the outcome variables is explained by the model[Multiple R-squared are below 12%]. This is an indication that the model is underfitting the data.
+The histogram and Normal probability shows that Length/height-for-age Z-score(haz06), Weight-for-age Z-score(waz06) and BMI-for-age Z-score(bmiz06) are normally distributed.
+
+The predicted models maps the actual values accurately as demonstrated by ME, RMSE, and MAPE.
+
+We retain the response variables Length/height-for-age Z-score(haz06), Weight-for-age Z-score(waz06) and BMI-for-age Z-score(bmiz06) because they have a smaller ME, RMSE and MAPE tests of accuracy of our model. The response variable Weight-for-length/height Z-score(whz06)is excluded as its MAPE variability is large i.e **20.6366**.
+
+
+
